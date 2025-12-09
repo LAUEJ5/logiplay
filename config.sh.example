@@ -1,0 +1,15 @@
+#!/bin/bash
+# API Keys Configuration
+# Copy this file to config.sh and fill in your keys:
+# cp config.sh.example config.sh
+# Then edit config.sh with your actual keys
+
+# OpenAI API Key (recommended - get at: https://platform.openai.com/api-keys)
+export OPENAI_API_KEY=""
+
+# Anthropic API Key (optional - for Claude)
+export ANTHROPIC_API_KEY=""
+
+# Gemini API Key (optional - for Google Gemini)
+export GEMINI_API_KEY=""
+

@@ -1,0 +1,14 @@
+# Core dependencies
+numpy>=1.24.0
+
+# LLM API clients
+openai>=1.0.0  # For OpenAI API (ChatGPT)
+anthropic>=0.18.0  # For Anthropic Claude API (optional)
+google-generativeai>=0.3.0  # For Google Gemini API (optional)
+
+# Development dependencies (optional)
+# pytest>=7.0.0  # For testing
+# black>=23.0.0  # Code formatting
+# mypy>=1.0.0  # Type checking
+
+
