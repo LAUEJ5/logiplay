@@ -1,19 +1,14 @@
-"""
-Logic-Aware LLM Agents for Lost Pig
-
-A framework for building LLM agents that maintain logical world-state consistency
-in Lost Pig text adventure game, using LMQL-style constraint-based reasoning.
-"""
-
-from agent import LogicAwareAgent
-from evaluation import AchievementEvaluator
-from example_llm_client import LLMClient
-from world_state import WorldState
+from agents.logic_aware_agent import LogicAwareAgent
+from agents.baseline_agent import BaselineAgent
+from core.evaluation import AchievementEvaluator
+from clients.llm_client import LLMClient
+from core.world_state import WorldState
 
 __version__ = "0.1.0"
 
 __all__ = [
     "LogicAwareAgent",
+    "BaselineAgent",
     "LLMClient",
     "AchievementEvaluator",
     "WorldState",

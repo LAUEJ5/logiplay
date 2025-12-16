@@ -53,5 +53,5 @@ if [ ! -f "games/lostpig.z5" ] && [ ! -f "games/lostpig.z8" ]; then
 fi
 
 # Run the agent with unbuffered output
-python -u run_lost_pig.py "$@"
+python -u scripts/run_lost_pig.py "$@"
 

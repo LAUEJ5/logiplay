@@ -1,31 +1,19 @@
-"""
-Run Logic-Aware Agent on Actual Lost Pig Game
-
-This script runs the logic-aware agent against the actual Lost Pig game
-using frotz. Make sure you have:
-1. Installed frotz: brew install frotz (macOS) or sudo apt-get install frotz (Linux)
-2. Downloaded Lost Pig game file (lostpig.z5 or lostpig.z8)
-3. Placed it in games/ directory
-
-Or just run: ./setup.sh to set everything up automatically.
-
-Usage:
-    python run_lost_pig.py [--game-file PATH] [--llm openai] [--max-turns N]
-"""
-
 import argparse
 import os
 import sys
 from typing import Optional
 
-# Force unbuffered output for real-time terminal display
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
-from agent import LogicAwareAgent
-from frotz_env import create_lost_pig_env, FROTZ_AVAILABLE
-from example_llm_client import OpenAIClient
-from evaluation import AchievementEvaluator
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from agents.logic_aware_agent import LogicAwareAgent
+from env.frotz_env import create_lost_pig_env, FROTZ_AVAILABLE
+from clients.llm_client import OpenAIClient
+from core.evaluation import AchievementEvaluator
 
 
 def main():
@@ -136,6 +124,9 @@ def main():
         print(f"\nScore: {results['game_score']}/{results['max_score']} points")
         print(f"Normalized score: {results['normalized_score']:.2f}")
         print(f"Turns taken: {results['turns_taken']}/40")
+        print(f"\nProgress Metrics:")
+        print(f"  Locations discovered: {results.get('locations_discovered', 0)}")
+        print(f"  Items collected: {results.get('items_collected', 0)}")
         
         if results['success']:
             print("\n🎉 SUCCESS: Completed the game within 40 turns!")
