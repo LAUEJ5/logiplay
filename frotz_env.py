@@ -12,7 +12,6 @@ from typing import Tuple, Optional, Dict, Any
 import tempfile
 import time
 import select
-import sys
 
 
 class FrotzEnv:
@@ -112,8 +111,28 @@ class FrotzEnv:
             # Give it a moment to start
             time.sleep(0.5)
             
-            # Read initial output
+            # Read initial output - we want to read until we get the first room description and prompt
+            # This includes the game banner and the initial room description
             observation = self._read_output()
+            
+            # For reset, we want to extract just the initial room description
+            # The output typically has: banner -> room title -> room description -> prompt
+            # We want everything up to and including the room description, but not the prompt
+            lines = observation.split('\n')
+            
+            # Find the room description part (usually starts with location name like "Outside")
+            # and ends before any command echo or prompt
+            cleaned_lines = []
+            for line in lines:
+                # Stop if we see a prompt or command echo
+                if line.strip() == '>' or (line.strip().startswith('>') and len(line.strip()) > 1):
+                    break
+                # Skip game banner lines (version info, etc.)
+                if any(banner in line for banner in ['Release', 'Serial number', 'Inform', 'ZCODE', 'For help']):
+                    continue
+                cleaned_lines.append(line)
+            
+            observation = '\n'.join(cleaned_lines).strip()
             
             self.turn_count = 0
             self.max_score = 0
@@ -128,17 +147,18 @@ class FrotzEnv:
                 "  Or download from: https://frotz.sourceforge.net/"
             )
     
-    def _read_output(self, timeout: float = 2.0) -> str:
+    def _read_output(self, timeout: float = None) -> str:
         """Read output from frotz process."""
         if not self.process:
             return ""
         
         output_lines = []
-        start_time = time.time()
         saw_prompt = False
+        no_output_count = 0
+        max_no_output_waits = 10  # After 10 waits with no output, assume done
         
         # Read available output
-        while time.time() - start_time < timeout:
+        while True:
             # Check if process is still running
             if self.process.poll() is not None:
                 # Process ended, read remaining output
@@ -150,41 +170,131 @@ class FrotzEnv:
                     pass
                 break
             
-            # Try to read a line (non-blocking)
+            # Try to read a line
             try:
                 # Check if data is available
-                ready, _, _ = select.select([self.process.stdout], [], [], 0.1)
+                ready, _, _ = select.select([self.process.stdout], [], [], 0.3)
                 if ready:
                     line = self.process.stdout.readline()
                     if not line:
+                        # Empty read - if we have output, wait longer for potential continuation
                         if output_lines:
-                            break  # Got some output, process might be waiting
-                        continue
-                    line = line.rstrip()
-                    if line:
-                        output_lines.append(line)
-                    # Check for prompt (">" at end of line or standalone)
-                    if '>' in line:
-                        saw_prompt = True
-                        # Give a tiny bit more time for any trailing text
-                        time.sleep(0.05)
-                        break
-                else:
-                    # No more data available
-                    if output_lines:
-                        # If we have output but no prompt yet, wait a bit more
-                        if not saw_prompt:
-                            time.sleep(0.1)
+                            # Give it multiple chances for more output
+                            for _ in range(3):
+                                time.sleep(0.2)
+                                ready2, _, _ = select.select([self.process.stdout], [], [], 0.1)
+                                if ready2:
+                                    # More data available, try reading again
+                                    line = self.process.stdout.readline()
+                                    if line:
+                                        break
+                            # If still no line after waiting, we're probably done
+                            if not line:
+                                break
+                            # If we got a line, continue processing it below
+                        else:
+                            # No output yet, keep waiting
+                            no_output_count += 1
+                            # If we've been waiting a long time with no output at all, probably done
+                            # This handles cases where invalid commands don't produce any response
+                            if no_output_count > max_no_output_waits:
+                                # Been waiting too long with no output - might be invalid command or no response
+                                break
                             continue
-                        break
-                    elif time.time() - start_time > 0.5:
-                        # Been waiting, probably no more output
-                        break
+                    
+                    if line:
+                        no_output_count = 0  # Reset counter when we get output
+                        line = line.rstrip('\n\r')
+                        
+                        # Skip empty lines unless we're building output
+                        if not line.strip() and not output_lines:
+                            continue
+                        
+                        # Check if this is the command echo
+                        stripped = line.strip()
+                        if stripped.startswith('>') and len(stripped) > 1:
+                            after_arrow = stripped[1:].strip()
+                            # Skip command echoes
+                            if len(after_arrow) > 0 and len(after_arrow) < 50 and not any(c in after_arrow for c in ['(', '[', ']']):
+                                continue
+                        
+                        # Check for prompt (">" standalone)
+                        if stripped == '>':
+                            saw_prompt = True
+                            break
+                        
+                        # Regular output line
+                        if line:
+                            output_lines.append(line)
+                else:
+                    # No data available right now
+                    if output_lines:
+                        # We have output - wait longer to see if more comes
+                        for _ in range(3):
+                            time.sleep(0.2)
+                            ready2, _, _ = select.select([self.process.stdout], [], [], 0.1)
+                            if ready2:
+                                # More data available, break to read it
+                                break
+                        else:
+                            # No more data after waiting, we're done
+                            break
+                    else:
+                        # No output yet, keep waiting
+                        no_output_count += 1
+                        # If we've been waiting a long time with no output at all, probably done
+                        if no_output_count > max_no_output_waits:
+                            # Been waiting too long with no output - might be invalid command or no response
+                            break
+                        time.sleep(0.1)
             except (ValueError, OSError, AttributeError):
                 # Process may have closed or stdout unavailable
                 break
         
-        return "\n".join(output_lines)
+        output_text = "\n".join(output_lines)
+        
+        # Strip ANSI escape codes more aggressively
+        import re
+        # Remove all ANSI escape sequences
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        output_text = ansi_escape.sub('', output_text)
+        
+        # Remove frotz-specific formatting codes like (B, (C, etc.
+        # These are Inform 6 formatting codes: (B = bold, (C = color, etc.
+        # Pattern is ( followed by a capital letter, possibly with = before it
+        output_text = re.sub(r'=?\(' + r'[A-Z]' + r'\)?', '', output_text)  # Remove (B, (C, =(B, etc.
+        
+        # Clean up cursor positioning codes and other control characters
+        output_text = re.sub(r'\[[\d;]*[HJKd]', '', output_text)  # Cursor movement
+        output_text = re.sub(r'\[[\d;]*m', '', output_text)  # Color codes
+        output_text = re.sub(r'\[[\d;]*r', '', output_text)  # Scroll region
+        output_text = re.sub(r'\[[\?]?[\d;]*[hl]', '', output_text)  # Mode changes
+        output_text = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', output_text)  # Any remaining escape sequences
+        
+        # Remove control characters but keep newlines and tabs
+        output_text = ''.join(char for char in output_text if ord(char) >= 32 or char in '\n\r\t')
+        
+        # Clean up multiple consecutive newlines
+        output_text = re.sub(r'\n{3,}', '\n\n', output_text)
+        
+        # Remove command echoes that might have slipped through (lines starting with ">command")
+        lines = output_text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # Skip lines that are just command echoes
+            if line.strip().startswith('>') and len(line.strip()) > 1 and not line.strip() == '>':
+                # Check if it looks like a command (has spaces or is a single word after >)
+                if ' ' in line.strip()[1:] or len(line.strip()) > 5:
+                    continue
+            cleaned_lines.append(line)
+        
+        output_text = '\n'.join(cleaned_lines)
+        
+        result = output_text.strip()
+        
+        # Always return something, even if empty, to prevent hanging
+        # The caller will handle empty responses
+        return result if result else ""
     
     def step(self, action: str) -> Tuple[str, float, bool, Dict[str, Any]]:
         """
@@ -214,18 +324,43 @@ class FrotzEnv:
             # Process may have ended
             pass
         
-        # Read response
+        # Read response - this should only be the NEW output after our action
         observation = self._read_output()
         
-        # Extract score if available
-        score_match = re.search(r'Score:\s*(\d+)', observation, re.IGNORECASE)
-        if score_match:
-            new_score = int(score_match.group(1))
-            score_change = new_score - self.score
-            self.score = new_score
+        # Clean up the observation - remove any duplicate intro text that frotz might re-display
+        # Sometimes frotz re-displays the room description, we want to filter that out
+        lines = observation.split('\n')
+        cleaned_lines = []
+        seen_intro = False
+        for line in lines:
+            # Skip game banner/intro lines if we've already seen them
+            if any(banner in line for banner in ['Release', 'Serial number', 'Inform', 'ZCODE', 'For help']):
+                if not seen_intro:
+                    seen_intro = True
+                continue
+            # Skip lines that are just the game title repeated
+            if line.strip() in ['Lost Pig', 'And Place Under Ground'] and seen_intro:
+                continue
+            cleaned_lines.append(line)
+        
+        observation = '\n'.join(cleaned_lines).strip()
+        
+        # Extract score if available - check for "[Grunk score go up one.]" message
+        score_increase = "[Grunk score go up one.]" in observation
+        if score_increase:
+            self.score += 1
+            score_change = 1.0
             self.max_score = max(self.max_score, self.score)
         else:
-            score_change = 0.0
+            # Fallback: try to extract from "Score: X" format if present
+            score_match = re.search(r'Score:\s*(\d+)', observation, re.IGNORECASE)
+            if score_match:
+                new_score = int(score_match.group(1))
+                score_change = new_score - self.score
+                self.score = new_score
+                self.max_score = max(self.max_score, self.score)
+            else:
+                score_change = 0.0
         
         # Check for game over
         done = False
@@ -306,32 +441,4 @@ for frotz_path in frotz_paths:
             break
 
 
-# Example usage
-if __name__ == "__main__":
-    # Test the environment
-    try:
-        env = create_lost_pig_env()
-        obs = env.reset()
-        print("Initial observation:")
-        print(obs)
-        print("\n" + "="*60 + "\n")
-        
-        # Try a few actions
-        test_actions = ["look", "go north", "take torch"]
-        for action in test_actions:
-            print(f"Action: {action}")
-            obs, reward, done, info = env.step(action)
-            print(f"Reward: {reward}, Done: {done}, Score: {info.get('score', 0)}")
-            print(f"Observation (first 200 chars):\n{obs[:200]}...")
-            print("\n" + "-"*60 + "\n")
-            if done:
-                break
-        
-        env.close()
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("\nTo use Frotz with Lost Pig:")
-        print("1. Install frotz: brew install frotz (macOS) or sudo apt-get install frotz (Linux)")
-        print("2. Download Lost Pig from https://ifdb.org")
-        print("3. Save as 'games/lostpig.z5' or 'games/lostpig.z8'")
 

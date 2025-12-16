@@ -37,47 +37,13 @@ if [ ! -f "games/lostpig.z5" ] && [ ! -f "games/lostpig.z8" ]; then
     echo ""
 fi
 
-# Parse arguments
-LLM=${1:-openai}
-if [ "$1" = "--llm" ] || [ "$1" = "-l" ]; then
-    LLM=${2:-openai}
-    shift 2
+# Check for API key
+if [ -z "$OPENAI_API_KEY" ]; then
+    echo "ERROR: OPENAI_API_KEY not set"
+    echo "Set it in config.sh or: export OPENAI_API_KEY='your-key'"
+    echo "Get your key at: https://platform.openai.com/api-keys"
+    exit 1
 fi
-
-# Check for API key based on LLM choice
-case $LLM in
-    openai)
-        if [ -z "$OPENAI_API_KEY" ]; then
-            echo "ERROR: OPENAI_API_KEY not set"
-            echo "Set it in config.sh or: export OPENAI_API_KEY='your-key'"
-            echo "Get your key at: https://platform.openai.com/api-keys"
-            exit 1
-        fi
-        ;;
-    anthropic)
-        if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "ERROR: ANTHROPIC_API_KEY not set"
-            echo "Set it in config.sh or: export ANTHROPIC_API_KEY='your-key'"
-            exit 1
-        fi
-        ;;
-    gemini)
-        if [ -z "$GEMINI_API_KEY" ]; then
-            echo "ERROR: GEMINI_API_KEY not set"
-            echo "Set it in config.sh or: export GEMINI_API_KEY='your-key'"
-            echo "Get your key at: https://aistudio.google.com/app/u/1/apikey"
-            exit 1
-        fi
-        ;;
-    mock)
-        echo "Using mock LLM (no API key needed)"
-        ;;
-    *)
-        echo "ERROR: Unknown LLM: $LLM"
-        echo "Choose: openai, anthropic, gemini, or mock"
-        exit 1
-        ;;
-esac
 
 # Check if game file exists
 if [ ! -f "games/lostpig.z5" ] && [ ! -f "games/lostpig.z8" ]; then
@@ -86,6 +52,6 @@ if [ ! -f "games/lostpig.z5" ] && [ ! -f "games/lostpig.z8" ]; then
     exit 1
 fi
 
-# Run the agent
-python run_lost_pig.py --llm "$LLM" "$@"
+# Run the agent with unbuffered output
+python -u run_lost_pig.py "$@"
 

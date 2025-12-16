@@ -6,9 +6,9 @@ A framework for building LLM agents that maintain logical world-state consistenc
 
 This project implements a **logic-aware LLM agent** that combines:
 - **Symbolic world-state tracking** (predicates: `at`, `has`, `alive`, `connected`)
-- **Hard & soft constraint enforcement** (LMQL-style eager evaluation)
-- **Action self-verification** (parser grammar validation)
-- **Constrained decoding** (pruning invalid action space)
+- **Action generation with context** (world state provides hints about valid actions)
+- **Automatic command cleaning** (fixes invalid compound commands)
+- **ReAct-style reasoning** (Think → Act → Observe loop)
 
 The agent plays **Lost Pig**, a text adventure where you play as Grunk, an orc searching for a lost pig.
 
@@ -72,16 +72,9 @@ export OPENAI_API_KEY="your-key"
 ./run.sh --llm openai
 # or just: ./run.sh
 
-# Anthropic Claude
-export ANTHROPIC_API_KEY="your-key"
-./run.sh --llm anthropic
-
-# Google Gemini
-export GEMINI_API_KEY="your-key"
-./run.sh --llm gemini
-
-# Mock (for testing, no API key needed)
-./run.sh --llm mock
+# OpenAI (default)
+export OPENAI_API_KEY="your-key"
+./run.sh
 ```
 
 ## Prerequisites
@@ -100,10 +93,8 @@ export GEMINI_API_KEY="your-key"
 logiplay/
 ├── agent.py              # Main LogicAwareAgent class
 ├── world_state.py        # Symbolic world state model (Lost Pig-specific)
-├── constraints.py        # Constraint checker (hard & soft, Lost Pig-specific)
-├── action_verifier.py    # Action structure validation
 ├── evaluation.py         # Evaluation metrics (Lost Pig achievements)
-├── example_llm_client.py # LLM client implementations (OpenAI, Anthropic, Gemini, Mock)
+├── example_llm_client.py # LLM client implementation (OpenAI)
 ├── frotz_env.py          # Frotz environment wrapper for Lost Pig
 ├── run_lost_pig.py       # Main script to run agent against actual Lost Pig game
 ├── setup.sh              # Setup script (installs frotz, downloads game, installs deps)
@@ -124,9 +115,9 @@ logiplay/
    - Displays results
 
 3. **Agent**:
-   - Uses symbolic world state to track game state
-   - Enforces constraints on actions
-   - Generates actions using your chosen LLM
+   - Uses symbolic world state to track game state and provide context
+   - Generates actions using your chosen LLM with clear command format instructions
+   - Cleans up invalid commands automatically (e.g., "go forest east" → "east")
    - Evaluates performance based on achievements
 
 ## Troubleshooting
@@ -157,16 +148,14 @@ logiplay/
 ┌─────────────────┐
 │  LLM generates  │
 │ candidate action│
+│ (with context)  │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Action Verifier │  ← Structural validation (parser grammar)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│Constraint Checker│ ← Logical validation (world state)
+│ Action Cleaner  │  ← Fixes invalid commands
+│ (go forest east │     (e.g., "go forest east" → "east")
+│  → east)        │
 └────────┬────────┘
          │
          ▼
@@ -184,28 +173,19 @@ Tracks game state using predicates:
 - `has(player, item)` - Inventory
 - `connected(loc1, loc2)` - Location connectivity
 
-### 2. Constraint System
+### 2. Action Generation & Cleaning
 
-**Hard constraints** (must be satisfied):
-- Cannot use items not in inventory
-- Cannot move through nonexistent exits
-- Torch must be lit for dark areas
+- LLM generates actions with explicit command format instructions
+- Automatic cleanup of invalid compound commands (e.g., "go forest east" → "east")
+- World state provides context about available exits and items
 
-**Soft constraints** (should be satisfied):
-- Discourage repetitive actions
-- Encourage coherent action sequences
+### 3. ReAct-Style Agent Loop
 
-### 3. Action Verification
-
-Validates actions conform to parser grammar before symbolic checks.
-
-### 4. ReAct-Style Agent Loop
-
-Standard ReAct loop enhanced with constraint enforcement:
+Standard ReAct loop:
 1. **Observe** environment text
-2. **Think** (LLM reasoning)
-3. **Act** (with constraint checking)
-4. **Update** symbolic world state
+2. **Think** (LLM reasoning about next action)
+3. **Act** (generate and clean action)
+4. **Update** symbolic world state from observation
 
 ## Research Context
 

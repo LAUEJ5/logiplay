@@ -1,2 +1,31 @@
-.env
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 config.sh
+.env
+game_log.txt
+*.log
+
+# Game files (optional - uncomment if you don't want to commit game files)
+# games/*.z5
+# games/*.z8

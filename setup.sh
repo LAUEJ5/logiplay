@@ -80,9 +80,9 @@ echo ""
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install -q openai anthropic google-generativeai || {
+pip install -q openai || {
     echo "Installing with verbose output..."
-    pip install openai anthropic google-generativeai
+    pip install openai
 }
 
 echo "✓ Python dependencies installed"
@@ -106,13 +106,8 @@ echo "     Edit config.sh and add your OPENAI_API_KEY"
 echo "     (Get key at: https://platform.openai.com/api-keys)"
 echo ""
 echo "  2. Run the agent:"
-echo "     ./run.sh --llm openai"
+echo "     ./run.sh"
 echo ""
-echo "Or use other LLMs (add keys to config.sh):"
-echo "  ./run.sh --llm anthropic  # Claude"
-echo "  ./run.sh --llm gemini     # Gemini"
-echo "  ./run.sh --llm mock       # Mock (no API key needed)"
-echo ""
-echo "Note: You can also set API keys via environment variables:"
-echo "  export OPENAI_API_KEY='your-key' && ./run.sh --llm openai"
+echo "Note: You can also set API key via environment variable:"
+echo "  export OPENAI_API_KEY='your-key' && ./run.sh"
 echo ""

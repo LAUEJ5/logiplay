@@ -1,457 +1,346 @@
 """
 World State Model for Lost Pig
 
-Defines the game world for Lost Pig, including:
-- Locations and their connections
-- Items and their initial locations
-- Puzzles and their dependencies
-- Character states
+Lightweight world state tracking:
+- Current location and discovered locations
+- Inventory tracking
+- Commands tried at each location (to avoid repetition)
+- Location connections (discovered through exploration)
 """
 
 from typing import Dict, Set, Optional, List
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass
 
 
 @dataclass
+class LocationInfo:
+    """Information about a discovered location."""
+    name: str
+    commands_tried: Set[str]
+    times_visited: int
+    items_found: Set[str]  # Items that were found/mentioned here
+    exits_discovered: Set[str]  # Directions that lead somewhere from here
+
+
 class WorldState:
     """
-    World state model for Lost Pig game.
+    Lightweight world state tracker for Lost Pig.
     
-    Lost Pig is a text adventure where you play as Grunk, an orc
-    searching for a lost pig. The game has specific locations,
-    items, and puzzles based on the actual game.
+    Tracks:
+    - Current location (parsed from observations)
+    - Inventory (parsed from observations)
+    - Commands tried at each location
+    - Discovered locations and their connections
     """
     
-    # Lost Pig specific constants
-    MAX_INVENTORY = 10  # Actually flexible in game, but reasonable limit
-    PLAYER_NAME = "grunk"
-    TARGET_ENTITY = "pig"
-    
-    # Note: Lost Pig doesn't have strict inventory limit like some games
-    # Grunk can carry multiple items, but be reasonable
-    
     def __init__(self):
-        # Player location
-        self.player_location: Optional[str] = None
+        # Current location (parsed from observations)
+        self.current_location: Optional[str] = None
         
-        # Inventory: set of items player has
+        # Inventory: items player currently has
         self.inventory: Set[str] = set()
         
-        # Character states: alive/dead
-        self.character_states: Dict[str, bool] = {}
+        # Location map: location_name -> LocationInfo
+        self.locations: Dict[str, LocationInfo] = {}
         
-        # Location connectivity graph
+        # Location connections: location -> set of connected locations
         self.connections: Dict[str, Set[str]] = defaultdict(set)
-        
-        # Item locations (where items are in the world)
-        self.item_locations: Dict[str, str] = {}
-        
-        # Action history for tracking
-        self.action_history: List[str] = []
         
         # Turn counter
         self.turn: int = 0
         
-        # Lost Pig specific
-        self.puzzles_solved: Set[str] = set()
-        self.pig_found = False
-        self.pig_location: Optional[str] = None
-        self.pig_caught = False
-        
-        # Torch state
-        self.torch_lit = True  # Starts lit
-        
-        # Pole color (color magnet mechanics)
-        self.pole_color = "green"  # Starts green (repels)
-        
-        # Secret door state
-        self.secret_door_open = False
-        
-        # Autobaker state
-        self.autobaker_has_coin = False
-        
-        self._initialize_world()
-    
-    def _initialize_world(self):
-        """Initialize Lost Pig game world based on actual game."""
-        
-        # Set starting location
-        self.player_location = "outside"
-        
-        # Define connections based on actual game map
-        connections = [
-            # Outside area
-            ("outside", "forest_north"),
-            ("outside", "forest_east"),
-            ("outside", "field_west"),
-            ("outside", "farm_south"),
-            
-            # Forest leads to hole
-            ("forest_north", "hole"),  # When going NE from forest
-            ("forest_east", "hole"),
-            
-            # Underground shrine connections
-            ("hole", "fountain_room"),  # East tunnel
-            ("fountain_room", "shelf_room"),  # SE
-            ("fountain_room", "table_room"),  # SW
-            ("fountain_room", "statue_room"),  # N
-            ("fountain_room", "cave_with_stream"),  # E/W tunnels
-            
-            ("shelf_room", "gnome_room"),  # W
-            ("table_room", "gnome_room"),  # E
-            ("table_room", "fountain_room"),  # NE (back to fountain room)
-            
-            ("statue_room", "windy_cave"),  # N (secret door, only when open)
-            ("windy_cave", "twisty_cave"),  # N
-            ("twisty_cave", "forest"),  # Exit (with gnome help or whistle)
-        ]
-        
-        for loc1, loc2 in connections:
-            self.add_connection(loc1, loc2, bidirectional=True)
-        
-        # Additional connections
-        self.add_connection("fountain_room", "table_room", bidirectional=True)
-        
-        # Define items and their initial locations (from walkthrough)
-        self.item_locations = {
-            "torch": "outside",  # Starts lit, can go out
-            "pants": "player",  # Worn (always with player)
-            "pole": "shelf_room",  # Green pole (color magnet, repels)
-            "key": "cave_with_stream",  # Red key, across stream (need pole)
-            "coin": "fountain_room",  # In fountain bowl
-            "chair": "table_room",  # Movable chair (used to reach top shelf, open secret door)
-            "hat": "statue_room",  # On statue (can hold water)
-            "whistle": "hole",  # On broken stairs (can call for help)
-            "book": "shelf_room",  # Top shelf (need chair to reach)
-            "paper": "hole",  # In crack (need black pole to get)
-            "powder": "shelf_room",  # In chest (black powder, dehydrated fire, need key)
-            "brick": None,  # From autobaker (not in world initially, need coin)
-            "orb": "gnome_room",  # Glowing ball (mossfuressence, need to trade torch)
-        }
-        
-        # Pig starts in hole/fountain room area (moves around)
-        self.pig_location = "fountain_room"
-        
-        # Add table_room connection
-        self.add_connection("fountain_room", "table_room", bidirectional=True)
-        
-        # Define puzzles and their requirements
-        self.puzzle_requirements = {
-            "windy_cave": {
-                "required_item": "orb", 
-                "description": "Need light source that won't blow out in wind (orb)"
-            },
-            "shelf_room_top": {
-                "required_item": "chair",
-                "description": "Need chair to reach top shelf"
-            },
-            "cave_chest": {
-                "required_item": "key",
-                "description": "Need key to unlock chest"
-            },
-            "statue_secret": {
-                "required_item": "chair",
-                "description": "Give chair to statue to open secret door"
-            },
-            "light_torch": {
-                "required_items": ["powder", "water"],
-                "description": "Need water + black powder to light torch"
-            },
-            "get_key": {
-                "required_item": "pole",
-                "description": "Need pole to get key across stream (color magnet)"
-            },
-            "get_paper": {
-                "required_item": "pole",
-                "required_color": "black",  # Pole must be black to attract white paper
-                "description": "Need black pole to get white paper from crack"
-            },
-            "catch_pig": {
-                "required_item": "brick",
-                "required_count": 2,  # Need multiple bricks
-                "description": "Need multiple bricks to distract and catch pig"
-            },
-        }
-        
-        # Character states
-        self.character_states = {
-            "grunk": True,  # Player is always alive
-            "pig": True,    # Pig is alive (just lost)
-            "gnome": True,  # Gnome in gnome room
-        }
-    
-    def at(self, entity: str, location: str) -> bool:
-        """Check if entity is at location."""
-        if entity == "player":
-            return self.player_location == location
-        elif entity == "pig":
-            return self.pig_location == location
-        return False
-    
-    def has(self, entity: str, item: str) -> bool:
-        """Check if entity has item."""
-        if entity == "player":
-            return item in self.inventory
-        return False
-    
-    def alive(self, character: str) -> bool:
-        """Check if character is alive."""
-        return self.character_states.get(character, True)  # Default alive
-    
-    def connected(self, loc1: str, loc2: str) -> bool:
-        """Check if two locations are connected."""
-        return loc2 in self.connections.get(loc1, set())
-    
-    def can_carry(self, item: str) -> bool:
-        """Check if Grunk can carry another item."""
-        # Lost Pig doesn't have strict inventory limit, but reasonable check
-        return len(self.inventory) < self.MAX_INVENTORY
-    
-    def puzzle_solved(self, puzzle_name: str) -> bool:
-        """Check if a puzzle is solved."""
-        return puzzle_name in self.puzzles_solved
-    
-    def mark_puzzle_solved(self, puzzle_name: str) -> None:
-        """Mark a puzzle as solved."""
-        self.puzzles_solved.add(puzzle_name)
-    
-    def can_access_location(self, location: str) -> bool:
-        """
-        Check if player can access a location based on puzzles/items.
-        
-        Returns True if location is accessible given current state.
-        """
-        if location not in self.puzzle_requirements:
-            return True
-        
-        puzzle = self.puzzle_requirements[location]
-        required_item = puzzle.get("required_item")
-        
-        if required_item is None:
-            return True
-        
-        return self.has("player", required_item)
-    
-    def torch_is_lit(self) -> bool:
-        """Check if torch is currently lit."""
-        return self.torch_lit and "torch" in self.inventory
-    
-    def set_torch_lit(self, lit: bool) -> None:
-        """Set torch lit/unlit state."""
-        self.torch_lit = lit
-    
-    def get_pole_color(self) -> str:
-        """Get current pole color."""
-        return self.pole_color
-    
-    def set_pole_color(self, color: str) -> None:
-        """Set pole color (for color magnet mechanics)."""
-        self.pole_color = color
-    
-    def set_location(self, location: str) -> None:
-        """Set player location."""
-        self.player_location = location
-    
-    def add_item(self, item: str) -> None:
-        """Add item to inventory."""
-        self.inventory.add(item)
-        # Special handling
-        if item == "torch" and not self.torch_lit:
-            # Torch can be picked up unlit
-            pass
-    
-    def remove_item(self, item: str) -> None:
-        """Remove item from inventory."""
-        self.inventory.discard(item)
-    
-    def set_character_alive(self, character: str, alive: bool) -> None:
-        """Set character alive/dead state."""
-        self.character_states[character] = alive
-    
-    def add_connection(self, loc1: str, loc2: str, bidirectional: bool = True) -> None:
-        """Add connection between locations."""
-        self.connections[loc1].add(loc2)
-        if bidirectional:
-            self.connections[loc2].add(loc1)
+        # Track if pig has been found/caught
+        self.pig_found: bool = False
+        self.pig_caught: bool = False
     
     def update_from_observation(self, observation: str, action: str) -> None:
         """
-        Update world state from Lost Pig observation.
-        
-        Extracts facts from game text using heuristics.
+        Update world state from observation and action.
+        Extracts location, inventory, and tracks commands per location.
         """
         self.turn += 1
-        self.action_history.append(action)
-        
         obs_lower = observation.lower()
         action_lower = action.lower()
         
-        # Track pig location and catching
+        # Parse current location from observation
+        location = self._parse_location(observation)
+        if location:
+            self.current_location = location
+            if location not in self.locations:
+                self.locations[location] = LocationInfo(
+                    name=location,
+                    commands_tried=set(),
+                    times_visited=0,
+                    items_found=set(),
+                    exits_discovered=set()
+                )
+            self.locations[location].times_visited += 1
+            
+            # Track command tried at this location
+            self.locations[location].commands_tried.add(action.lower().strip())
+        
+        # Parse inventory from observation
+        self._update_inventory(observation, action)
+        
+        # Track pig status
         if "pig" in obs_lower:
-            if any(word in obs_lower for word in ["catch", "grab", "hold", "have pig", "carrying pig"]):
+            if any(word in obs_lower for word in ["catch", "grab", "hold", "carrying", "have pig"]):
                 self.pig_found = True
                 self.pig_caught = True
-                self.pig_location = self.player_location
             elif any(word in obs_lower for word in ["see pig", "pig here", "pig there"]):
                 self.pig_found = True
-                if "fountain" in obs_lower:
-                    self.pig_location = "fountain_room"
-                elif "shelf" in obs_lower:
-                    self.pig_location = "shelf_room"
-                elif "table" in obs_lower:
-                    self.pig_location = "table_room"
-                elif "gnome" in obs_lower:
-                    self.pig_location = "gnome_room"
         
-        # Track item pickups
-        if any(verb in action_lower for verb in ["take", "get", "pick", "grab"]):
-            for item in list(self.item_locations.keys()):
-                if item in action_lower and item in obs_lower:
-                    if any(word in obs_lower for word in ["take", "pick", "get", "got it", "ok, got"]):
-                        self.add_item(item)
-                        # Remove from world location
-                        if item in self.item_locations:
-                            del self.item_locations[item]
+        # Track location connections (when moving)
+        if self._is_movement_action(action):
+            # We'll track connections when we see location changes
+            pass
         
-        # Track item drops
-        if "drop" in action_lower:
-            for item in list(self.inventory):
-                if item in action_lower:
-                    self.remove_item(item)
-                    self.item_locations[item] = self.player_location
+        # Track items found at current location
+        if self.current_location:
+            items_in_obs = self._extract_items_from_observation(observation)
+            self.locations[self.current_location].items_found.update(items_in_obs)
+    
+    def _parse_location(self, observation: str) -> Optional[str]:
+        """
+        Parse location name from observation.
+        Looks for location indicators in the text.
+        """
+        obs_lower = observation.lower()
         
-        # Track torch state
-        if "torch" in obs_lower:
-            if any(word in obs_lower for word in ["go out", "extinguished", "not lit", "black and sooty"]):
-                self.torch_lit = False
-            elif any(word in obs_lower for word in ["light", "on fire", "burning", "lit"]):
-                self.torch_lit = True
-        
-        # Track location changes
+        # Location keywords that appear in room descriptions
         location_keywords = {
-            "outside": ["outside", "clearing", "open area"],
-            "forest_north": ["forest", "north forest"],
-            "forest_east": ["forest", "east forest"],
-            "hole": ["hole", "bottom of", "deep hole", "fall down"],
+            "outside": ["outside", "clearing", "open area", "farm"],
+            "forest": ["forest", "dark", "tree", "bush"],
+            "hole": ["hole", "bottom of", "deep hole", "fall down", "deep, dark hole"],
             "fountain_room": ["fountain room", "fountain", "glowing wall", "all wall glow"],
-            "shelf_room": ["shelf room", "shelfs", "shelves"],
-            "gnome_room": ["gnome room", "closet", "little person room"],
-            "table_room": ["table room", "table", "autobaker"],
-            "statue_room": ["statue room", "statue"],
-            "cave_with_stream": ["cave with stream", "stream", "cave"],
+            "shelf_room": ["shelf room", "shelfs", "shelves", "shelf"],
+            "gnome_room": ["gnome room", "closet", "little person room", "bed", "desk", "gnome"],
+            "table_room": ["table room", "table", "autobaker", "metal box"],
+            "statue_room": ["statue room", "statue", "picture"],
+            "cave_with_stream": ["cave with stream", "stream", "cave", "water"],
             "windy_cave": ["windy cave", "wind"],
             "twisty_cave": ["twisty cave", "twisty tunnel"],
-            "forest": ["forest", "outside again"],
         }
         
-        for loc, keywords in location_keywords.items():
+        # Check for location indicators
+        for loc_name, keywords in location_keywords.items():
             if any(kw in obs_lower for kw in keywords):
-                self.player_location = loc
-                break
+                # Additional context checks for ambiguous cases
+                if loc_name == "forest" and "outside" in obs_lower:
+                    continue  # Prefer "outside" if both present
+                if loc_name == "hole" and "fountain" in obs_lower:
+                    continue  # Prefer "fountain_room" if both present
+                return loc_name
         
-        # Track puzzle solving
-        if "unlock" in obs_lower or "open" in obs_lower:
-            if "chest" in obs_lower:
-                self.mark_puzzle_solved("cave_chest")
+        # If no match, try to extract from room title (first line often has location)
+        lines = observation.split('\n')
+        if lines:
+            first_line = lines[0].lower()
+            # Look for capitalized words that might be location names
+            for word in first_line.split():
+                if word and word[0].isupper() and len(word) > 3:
+                    # Could be a location name
+                    pass
         
-        if "secret door" in obs_lower or "wall open" in obs_lower:
-            self.secret_door_open = True
-            self.mark_puzzle_solved("statue_secret")
-        
-        if "light" in obs_lower and "torch" in obs_lower:
-            if "fire" in obs_lower or "burning" in obs_lower:
-                self.torch_lit = True
-                self.mark_puzzle_solved("light_torch")
-        
-        # Track pole color changes (burning changes green to black)
-        if "burn" in action_lower and "pole" in action_lower:
-            if "black" in obs_lower or "sooty" in obs_lower:
-                self.pole_color = "black"
-        
-        # Track autobaker usage
-        if "coin" in action_lower and "slot" in action_lower:
-            self.autobaker_has_coin = True
-        if "lever" in action_lower and "brick" in obs_lower:
-            self.autobaker_has_coin = False
-            if "brick" not in self.item_locations:
-                self.item_locations["brick"] = "table_room"
+        return None
     
-    def get_state_summary(self) -> str:
-        """Get Lost Pig-specific state summary."""
-        lines = [
-            f"=== Lost Pig Game State (Turn {self.turn}) ===",
-            f"Player (Grunk) Location: {self.player_location or 'Unknown'}",
-            f"Inventory ({len(self.inventory)}): {', '.join(self.inventory) if self.inventory else 'Empty'}",
+    def _update_inventory(self, observation: str, action: str) -> None:
+        """
+        Update inventory from observation and action.
+        Tracks when items are picked up or dropped.
+        """
+        obs_lower = observation.lower()
+        action_lower = action.lower()
+        
+        # Check for inventory listing (explicit inventory command)
+        if "grunk have:" in obs_lower or "inventory" in obs_lower or "i" == action_lower.strip():
+            # Parse inventory list
+            lines = observation.split('\n')
+            in_inventory_section = False
+            new_inventory = set()
+            for line in lines:
+                line_lower = line.lower()
+                if "grunk have:" in line_lower or "inventory" in line_lower:
+                    in_inventory_section = True
+                    continue
+                if in_inventory_section:
+                    # Extract item names from this line
+                    items = self._extract_items_from_text(line)
+                    new_inventory.update(items)
+                    # Stop at empty line or parenthetical
+                    if not line.strip() or (line.strip().startswith('(') and ')' in line):
+                        break
+            if new_inventory:
+                self.inventory = new_inventory
+        
+        # Track pickups (from action success)
+        if any(verb in action_lower for verb in ["take", "get", "pick", "grab"]):
+            # Check if action was successful
+            if any(word in obs_lower for word in ["got it", "ok, got", "take", "pick", "get", "ok, got it"]):
+                items = self._extract_items_from_text(action)
+                self.inventory.update(items)
+        
+        # Track drops
+        if "drop" in action_lower:
+            items = self._extract_items_from_text(action)
+            for item in items:
+                self.inventory.discard(item)
+        
+        # Track item usage/removal (e.g., eating, using up)
+        if any(verb in action_lower for verb in ["eat", "use", "drink", "consume"]):
+            # Check if item was consumed
+            if any(word in obs_lower for word in ["all gone", "eat", "use", "consume", "drink"]):
+                items = self._extract_items_from_text(action)
+                for item in items:
+                    if item in ["brick", "orb", "food"]:  # Items that can be consumed
+                        self.inventory.discard(item)
+    
+    def _extract_items_from_text(self, text: str) -> List[str]:
+        """Extract item names from text."""
+        text_lower = text.lower()
+        common_items = [
+            "torch", "pole", "key", "coin", "brick", "hat", "whistle", "chair",
+            "book", "paper", "powder", "water", "orb", "ball", "pig", "pants"
+        ]
+        found_items = []
+        for item in common_items:
+            if item in text_lower:
+                found_items.append(item)
+        return found_items
+    
+    def _extract_items_from_observation(self, observation: str) -> Set[str]:
+        """Extract items mentioned in observation."""
+        items = set()
+        obs_lower = observation.lower()
+        
+        common_items = [
+            "torch", "pole", "key", "coin", "brick", "hat", "whistle", "chair",
+            "book", "paper", "powder", "water", "orb", "ball", "pig", "pants",
+            "chest", "box", "fountain", "statue", "shelf", "table", "bench",
+            "stream", "curtain", "picture", "wall"
         ]
         
-        if "torch" in self.inventory:
-            torch_status = "LIT" if self.torch_lit else "UNLIT"
-            lines.append(f"Torch: {torch_status}")
+        for item in common_items:
+            if item in obs_lower:
+                items.add(item)
         
-        if "pole" in self.inventory:
-            lines.append(f"Pole color: {self.pole_color}")
+        return items
+    
+    def _is_movement_action(self, action: str) -> bool:
+        """Check if action is a movement command."""
+        action_lower = action.lower().strip()
+        directions = ["north", "south", "east", "west", "up", "down", 
+                     "northeast", "northwest", "southeast", "southwest",
+                     "ne", "nw", "se", "sw", "n", "s", "e", "w"]
+        return action_lower in directions
+    
+    def get_commands_tried_at_location(self, location: Optional[str] = None) -> Set[str]:
+        """Get commands already tried at a location."""
+        loc = location or self.current_location
+        if loc and loc in self.locations:
+            return self.locations[loc].commands_tried.copy()
+        return set()
+    
+    def get_summary(self) -> str:
+        """Get summary of world state for LLM context."""
+        lines = []
         
-        if self.pig_found:
-            if self.pig_caught:
-                lines.append(f"Pig Status: CAUGHT")
-            else:
-                lines.append(f"Pig Status: FOUND at {self.pig_location}")
+        # Current location
+        if self.current_location:
+            lines.append(f"Current Location: {self.current_location}")
+            loc_info = self.locations.get(self.current_location)
+            if loc_info:
+                lines.append(f"  Visited {loc_info.times_visited} time(s)")
+                if loc_info.commands_tried:
+                    lines.append(f"  Commands tried here: {', '.join(sorted(list(loc_info.commands_tried)[:5]))}")
+                if loc_info.items_found:
+                    lines.append(f"  Items found here: {', '.join(sorted(list(loc_info.items_found)[:5]))}")
         else:
-            lines.append("Pig Status: NOT FOUND")
+            lines.append("Current Location: Unknown")
         
-        if self.puzzles_solved:
-            lines.append(f"Puzzles Solved: {', '.join(self.puzzles_solved)}")
+        # Inventory
+        if self.inventory:
+            lines.append(f"Inventory ({len(self.inventory)}): {', '.join(sorted(self.inventory))}")
+        else:
+            lines.append("Inventory: Empty")
         
-        if self.player_location and self.player_location in self.connections:
-            exits = self.connections[self.player_location]
-            lines.append(f"Exits: {', '.join(exits)}")
+        # Discovered locations
+        if len(self.locations) > 1:
+            lines.append(f"\nDiscovered Locations ({len(self.locations)}):")
+            for loc_name, loc_info in sorted(self.locations.items()):
+                if loc_name != self.current_location:
+                    lines.append(f"  - {loc_name} (visited {loc_info.times_visited}x)")
         
-        # Show items in current location
-        items_here = [item for item, loc in self.item_locations.items() if loc == self.player_location]
-        if items_here:
-            lines.append(f"Items here: {', '.join(items_here)}")
+        # Pig status
+        if self.pig_caught:
+            lines.append("\nPig Status: CAUGHT")
+        elif self.pig_found:
+            lines.append("\nPig Status: FOUND")
+        else:
+            lines.append("\nPig Status: NOT FOUND")
         
         return "\n".join(lines)
     
-    def to_predicates(self) -> List[str]:
-        """Convert to Lost Pig-specific predicates."""
-        predicates = []
+    def get_location_context(self, location: Optional[str] = None) -> str:
+        """Get context about what's been tried at a location."""
+        loc = location or self.current_location
+        if not loc or loc not in self.locations:
+            return ""
         
-        if self.player_location:
-            predicates.append(f"at(player, {self.player_location})")
+        loc_info = self.locations[loc]
+        lines = []
         
-        for item in self.inventory:
-            predicates.append(f"has(player, {item})")
+        if loc_info.commands_tried:
+            # Group commands by type for better readability
+            movement = [c for c in loc_info.commands_tried if self._is_movement_action(c)]
+            examine = [c for c in loc_info.commands_tried if "examine" in c or "x " in c or "look" in c]
+            other = [c for c in loc_info.commands_tried if c not in movement and c not in examine]
+            
+            if movement:
+                lines.append(f"Directions tried: {', '.join(sorted(movement)[:5])}")
+            if examine:
+                lines.append(f"Examine commands: {', '.join(sorted(examine)[:5])}")
+            if other:
+                lines.append(f"Other commands tried: {', '.join(sorted(other)[:5])}")
         
-        for char, alive in self.character_states.items():
-            if alive:
-                predicates.append(f"alive({char})")
-            else:
-                predicates.append(f"not alive({char})")
+        if loc_info.items_found:
+            lines.append(f"Items found/mentioned here: {', '.join(sorted(list(loc_info.items_found)[:6]))}")
         
-        for loc1, exits in self.connections.items():
-            for loc2 in exits:
-                predicates.append(f"connected({loc1}, {loc2})")
+        return "\n".join(lines)
+    
+    def should_avoid_command(self, command: str, location: Optional[str] = None) -> bool:
+        """Check if a command should be avoided (already tried at this location)."""
+        loc = location or self.current_location
+        if not loc or loc not in self.locations:
+            return False
         
-        # Add Lost Pig specific predicates
-        if self.pig_found:
-            predicates.append(f"found({self.TARGET_ENTITY})")
-            if self.pig_location:
-                predicates.append(f"at({self.TARGET_ENTITY}, {self.pig_location})")
-            if self.pig_caught:
-                predicates.append(f"caught({self.TARGET_ENTITY})")
+        command_lower = command.lower().strip()
+        tried_commands = self.locations[loc].commands_tried
         
-        for puzzle in self.puzzles_solved:
-            predicates.append(f"solved({puzzle})")
+        # Check exact match
+        if command_lower in tried_commands:
+            return True
         
-        if "torch" in self.inventory:
-            predicates.append(f"torch_lit({self.torch_lit})")
+        # Check for similar commands (e.g., "examine pole" vs "x pole")
+        if "examine" in command_lower or "x " in command_lower:
+            # Extract item name
+            item = command_lower.replace("examine", "").replace("x ", "").strip()
+            if item:
+                # Check if any variation of examining this item was tried
+                for tried in tried_commands:
+                    tried_lower = tried.lower()
+                    if ("examine" in tried_lower or "x " in tried_lower) and item in tried_lower:
+                        return True
         
-        if "pole" in self.inventory:
-            predicates.append(f"pole_color({self.pole_color})")
+        # Check for "listen" variations
+        if command_lower == "listen":
+            if "listen" in tried_commands:
+                return True
         
-        if self.secret_door_open:
-            predicates.append("secret_door_open")
+        # Check for "look" variations
+        if command_lower in ["look", "l"]:
+            if "look" in tried_commands or "l" in tried_commands:
+                return True
         
-        return predicates
+        return False
