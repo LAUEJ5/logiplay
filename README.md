@@ -5,10 +5,9 @@ A framework for building LLM agents that maintain logical world-state consistenc
 ## Overview
 
 This project implements a **logic-aware LLM agent** that combines:
-- **Symbolic world-state tracking** (predicates: `at`, `has`, `alive`, `connected`)
-- **Action generation with context** (world state provides hints about valid actions)
-- **Automatic command cleaning** (fixes invalid compound commands)
-- **ReAct-style reasoning** (Think → Act → Observe loop)
+- **Symbolic world-state tracking** - Tracks locations, inventory, and game progress
+- **Action generation with context** - World state provides hints about valid actions
+- **ReAct-style reasoning** - Think → Act → Observe loop
 
 The agent plays **Lost Pig**, a text adventure where you play as Grunk, an orc searching for a lost pig.
 
@@ -34,47 +33,45 @@ This script will:
 
 ### 3. Set Your API Key
 
-Edit `config.sh` (created automatically from template) and add your OpenAI API key:
+Set your API key as an environment variable or in `config.sh`:
 
 ```bash
-# Edit config.sh
-nano config.sh  # or use your favorite editor
-
-# Add your key:
+# OpenAI
 export OPENAI_API_KEY="your-key-here"
+
+# Anthropic
+export ANTHROPIC_API_KEY="your-key-here"
+
+# Gemini
+export GEMINI_API_KEY="your-key-here"
 ```
 
-Get your OpenAI API key at: https://platform.openai.com/api-keys
-
-**Alternative**: You can also set it via environment variable:
-```bash
-export OPENAI_API_KEY="your-key-here"
-```
+Get API keys:
+- OpenAI: https://platform.openai.com/api-keys
+- Anthropic: https://console.anthropic.com/
+- Gemini: https://makersuite.google.com/app/apikey
 
 ### 4. Run the Agent
 
 ```bash
+# Run with OpenAI (default)
 ./run.sh --llm openai
+
+# Run with Anthropic
+./run.sh --llm anthropic
+
+# Run with Gemini
+./run.sh --llm gemini
 ```
 
-Or simply:
-```bash
-./run.sh
-```
-
-That's it! The agent will play Lost Pig using your API key.
-
-## Using Different LLMs
+Or use the test script to compare agents:
 
 ```bash
-# OpenAI (default - recommended)
-export OPENAI_API_KEY="your-key"
-./run.sh --llm openai
-# or just: ./run.sh
+# Test logic-aware agent
+python scripts/test_agents.py --agent logic-aware --llm openai
 
-# OpenAI (default)
-export OPENAI_API_KEY="your-key"
-./run.sh
+# Test baseline agent
+python scripts/test_agents.py --agent baseline --llm openai
 ```
 
 ## Prerequisites
@@ -84,108 +81,154 @@ export OPENAI_API_KEY="your-key"
   - Linux: `sudo apt-get install frotz`
   - The setup script will install it automatically if missing
 - **Python 3.8+**
-- **OpenAI API key** (recommended) or API key for another LLM
-  - Get OpenAI key: https://platform.openai.com/api-keys
+- **API key** for one of: OpenAI, Anthropic, or Gemini
 
 ## Project Structure
 
 ```
 logiplay/
-├── agent.py              # Main LogicAwareAgent class
-├── world_state.py        # Symbolic world state model (Lost Pig-specific)
-├── evaluation.py         # Evaluation metrics (Lost Pig achievements)
-├── example_llm_client.py # LLM client implementation (OpenAI)
-├── frotz_env.py          # Frotz environment wrapper for Lost Pig
-├── run_lost_pig.py       # Main script to run agent against actual Lost Pig game
-├── setup.sh              # Setup script (installs frotz, downloads game, installs deps)
-├── run.sh                # Run script (executes the agent)
-└── README.md            # This file
+├── agents/
+│   ├── logic_aware_agent.py  # Main agent with world state tracking
+│   └── baseline_agent.py      # Simple baseline agent for comparison
+├── clients/
+│   └── llm_client.py          # LLM client implementations (OpenAI, Anthropic, Gemini)
+├── core/
+│   ├── world_state.py         # World state tracking (locations, inventory, progress)
+│   └── evaluation.py          # Evaluation metrics (score, progress tracking)
+├── env/
+│   └── frotz_env.py           # Frotz environment wrapper for Lost Pig
+├── scripts/
+│   ├── run_lost_pig.py        # Main script to run logic-aware agent
+│   └── test_agents.py         # Script to test different agents and LLMs
+├── games/
+│   └── lostpig.z8             # Lost Pig game file
+├── setup.sh                   # Setup script
+├── run.sh                     # Run script
+└── README.md                  # This file
 ```
 
 ## How It Works
 
 1. **Setup** (`setup.sh`):
    - Checks/installs frotz (Z-machine interpreter)
-   - Downloads Lost Pig game file (.z5 or .z8)
+   - Downloads Lost Pig game file (.z8)
    - Installs Python dependencies
 
-2. **Run** (`run.sh`):
-   - Runs the agent directly
-   - Uses system frotz to execute the game file
-   - Displays results
+2. **Run** (`run.sh` or `scripts/run_lost_pig.py`):
+   - Initializes the Frotz environment
+   - Creates a logic-aware agent with world state tracking
+   - Runs the agent through the game
+   - Displays results and metrics
 
 3. **Agent**:
-   - Uses symbolic world state to track game state and provide context
-   - Generates actions using your chosen LLM with clear command format instructions
-   - Cleans up invalid commands automatically (e.g., "go forest east" → "east")
-   - Evaluates performance based on achievements
+   - Uses world state to track locations, inventory, and progress
+   - Generates actions using your chosen LLM
+   - Updates world state from observations
+   - Evaluates performance based on score and progress metrics
 
-## Troubleshooting
+## Agents
 
-**"frotz is not installed"**:
-- macOS: `brew install frotz`
-- Linux: `sudo apt-get install frotz`
-- Or run `./setup.sh` to install automatically
+### Logic-Aware Agent
 
-**"frotz command not found"**:
-- Make sure frotz is in your PATH
-- Try: `which frotz` to check if it's installed
-- Restart your terminal after installation
+The main agent that maintains world state:
+- Tracks current location and visited locations
+- Maintains inventory of collected items
+- Records commands tried at each location
+- Provides context to the LLM about game state
 
-**"API key not found"**:
-- Make sure you've set the environment variable: `export OPENAI_API_KEY="your-key"`
-- Or edit `config.sh` and add your key there
-- The key must be set before running `./run.sh`
+### Baseline Agent
 
-**"Game file not found"**:
-- Run `./setup.sh` again to download the game file
-- Or manually download from https://ifdb.org/viewgame?id=mohwfk47yjzii14w
-- Save as `games/lostpig.z5` or `games/lostpig.z8`
+A simplified agent for comparison:
+- Only uses current observation
+- No world state tracking
+- Minimal prompt structure
+
+## Evaluation Metrics
+
+The evaluation system tracks:
+
+1. **Game Score** - Based on "[Grunk score go up one.]" messages (max 7 points)
+2. **Locations Discovered** - Number of unique locations visited
+3. **Items Collected** - Number of unique items that have been in inventory
+
+Results are displayed after each episode with:
+- Final score and normalized score
+- Turns taken
+- Progress metrics (locations, items)
+- Success status (completed within 40 turns)
+
+## Using Different LLMs
+
+The framework supports three LLM providers:
+
+### OpenAI
+
+```bash
+export OPENAI_API_KEY="your-key"
+./run.sh --llm openai
+```
+
+### Anthropic
+
+```bash
+export ANTHROPIC_API_KEY="your-key"
+./run.sh --llm anthropic
+```
+
+### Gemini
+
+```bash
+export GEMINI_API_KEY="your-key"
+./run.sh --llm gemini
+```
+
 
 ## Architecture
 
-```
-┌─────────────────┐
-│  LLM generates  │
-│ candidate action│
-│ (with context)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Action Cleaner  │  ← Fixes invalid commands
-│ (go forest east │     (e.g., "go forest east" → "east")
-│  → east)        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Valid Action    │
-└─────────────────┘
-```
+The agent follows a ReAct-style loop:
+
+1. **Observe** - Read game state from Frotz environment
+2. **Think** - LLM reasons about current situation and world state
+3. **Act** - LLM generates action command
+4. **Update** - Update world state from observation
+5. **Repeat** - Continue until game ends or max turns reached
+
+The world state tracks:
+- Current location and discovered locations
+- Inventory and collected items
+- Commands tried at each location
+- Pig status (found/caught)
 
 ## Key Features
 
-### 1. Symbolic World State Model
+### 1. World State Tracking
 
-Tracks game state using predicates:
-- `at(player, location)` - Player location
-- `has(player, item)` - Inventory
-- `connected(loc1, loc2)` - Location connectivity
+Tracks game state including:
+- Current location and location history
+- Inventory and item collection history
+- Commands tried at each location
+- Progress metrics (locations discovered, items collected)
 
-### 2. Action Generation & Cleaning
+### 2. Multi-LLM Support
 
-- LLM generates actions with explicit command format instructions
-- Automatic cleanup of invalid compound commands (e.g., "go forest east" → "east")
-- World state provides context about available exits and items
+Supports multiple LLM providers:
+- OpenAI
+- Anthropic
+- Gemini
 
 ### 3. ReAct-Style Agent Loop
 
 Standard ReAct loop:
 1. **Observe** environment text
-2. **Think** (LLM reasoning about next action)
-3. **Act** (generate and clean action)
-4. **Update** symbolic world state from observation
+2. **Think** (LLM reasoning about next action with world state context)
+3. **Act** (generate action command)
+4. **Update** world state from observation
+
+### 4. Progress Tracking
+
+Tracks incremental progress beyond game score:
+- Locations discovered (exploration progress)
+- Items collected (acquisition progress)
 
 ## Research Context
 
@@ -193,26 +236,4 @@ This implementation is designed for research on:
 - World-state consistency in LLM agents
 - Constraint-based reasoning for long-horizon tasks
 - Symbolic + neural hybrid approaches
-
-Based on the presentation: "Logic-Aware LLM Agents for Text Adventures: Using Symbolic Constraints for World-State Consistency"
-
-## Citation
-
-If you use this code, please cite:
-
-```bibtex
-@article{lmql2023,
-  title={Prompting Is Programming: A Query Language for Large Language Models},
-  author={Beurer-Kellner, Luca and Fischer, Marc and Vechev, Martin},
-  journal={arXiv preprint arXiv:2212.06094},
-  year={2023}
-}
-```
-
-## License
-
-[Specify your license here]
-
-## Contact
-
-Jeremy Laue - [Your contact info]
+- Multi-LLM agent comparison
