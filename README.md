@@ -161,7 +161,7 @@ Results are displayed after each episode with:
 
 The framework supports three LLM providers:
 
-### OpenAI
+### OpenAI 
 
 ```bash
 export OPENAI_API_KEY="your-key"
